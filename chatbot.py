@@ -33,7 +33,8 @@ class InteractiveSpeakerPrepAgent:
             "process_audience_feedback",
             "assess_knowledge", 
             "process_knowledge_feedback", 
-            "generate_recommendation"
+            "generate_recommendation",
+            "process_recommendation_feedback",
         ]
         self.current_step_index = 0
     
@@ -52,6 +53,8 @@ class InteractiveSpeakerPrepAgent:
             "knowledge_approved": False,
             "knowledge_modification_count": 0,
             "knowledge_assessment": {},
+            "recommendation_approved": False,
+            "recommendation_modification_count": 0,
         }
         
     def start_conversation(self):
@@ -110,30 +113,35 @@ class InteractiveSpeakerPrepAgent:
         
         # Special handling for feedback steps
         if current_step_name == "process_audience_feedback":
-            # Execute audience feedback processing
             response = self._execute_step("process_audience_feedback")
-            
             if response:
                 self._display_agent_message(response)
-            
-            # Check if we should continue or stay in feedback loop
             if not self.state.get("audience_approved", False):
-                return  # Stay in the same step for more feedback
+                return
             else:
-                self.current_step_index += 1  # Move to next step
+                self.current_step_index += 1
                 
         elif current_step_name == "process_knowledge_feedback":
-            # Execute knowledge feedback processing
             response = self._execute_step("process_knowledge_feedback")
-            
             if response:
                 self._display_agent_message(response)
-            
-            # Check if we should continue or stay in feedback loop
             if not self.state.get("knowledge_approved", False):
-                return  # Stay in the same step for more feedback
+                return
             else:
-                self.current_step_index += 1  # Move to next step
+                self.current_step_index += 1
+                
+        elif current_step_name == "process_recommendation_feedback":
+            response = self._execute_step("process_recommendation_feedback")
+            if response:
+                self._display_agent_message(response)
+            if not self.state.get("recommendation_approved", False):
+                return
+            else:
+                # Recommendation approved, analysis complete
+                if self.state.get("final_recommendation"):
+                    print("\n✅ Аналіз завершено!")
+                    self._show_summary()
+                return
         else:
             # Normal step progression
             self.current_step_index += 1
@@ -143,7 +151,6 @@ class InteractiveSpeakerPrepAgent:
             current_step = self.conversation_steps[self.current_step_index]
             self.state["current_step"] = current_step
             
-            # Execute current step
             response = self._execute_step(current_step)
             
             if response:
@@ -156,6 +163,7 @@ class InteractiveSpeakerPrepAgent:
                 self._show_summary()
             else:
                 print("\n👋 До побачення!")
+
 
 
     
@@ -193,6 +201,9 @@ class InteractiveSpeakerPrepAgent:
             
         elif step == "generate_recommendation":
             return self._generate_recommendation()
+        
+        elif step == "process_recommendation_feedback":
+            return self._process_recommendation_feedback()
             
         return None
     
@@ -472,10 +483,14 @@ class InteractiveSpeakerPrepAgent:
             
             if intent == "CONTINUE":
                 self.state["audience_approved"] = True
-                return "Чудово! Переходимо до наступного етапу."
+                self.current_step_index += 1
+                return self._assess_knowledge()
                 
             elif intent == "ADD":
                 return self._handle_add_segments(user_feedback)
+                
+            elif intent == "CHANGE":
+                return self._handle_change_segments(user_feedback)
                 
             elif intent == "REMOVE":
                 return self._handle_remove_segments(user_feedback)
@@ -502,6 +517,7 @@ class InteractiveSpeakerPrepAgent:
         Визнач намір користувача:
         - CONTINUE: користувач задоволений і хоче продовжити (так, добре, згоден, продовжуємо, etc.)
         - ADD: хоче додати інформацію (додати, ще є, також, включити, etc.)
+        - CHANGE: хоче виправити неточності (не так, насправді, виправити, etc.)
         - REMOVE: хоче видалити щось (видалити, прибрати, не потрібно, зайве, etc.)
         - REWRITE: хоче написати сегменти сам (сам напишу, по-своєму, інакше, etc.)
         - REGENERATE: хоче щоб агент перегенерував (заново, по-новому, інший варіант, etc.)
@@ -523,6 +539,35 @@ class InteractiveSpeakerPrepAgent:
         Поточний аналіз аудиторії: {current_segments}
         
         Користувач хоче додати: {user_feedback}
+        
+        Оновіть аналіз аудиторії, включивши нову інформацію від користувача.
+        Зберігайте структуру та стиль оригінального аналізу.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=update_prompt)])
+        updated_segments = response.content
+        
+        self.state["audience_analysis"]["segments"] = updated_segments
+        
+        return f"""
+    Оновлений аналіз аудиторії:
+
+    {updated_segments}
+
+    Чи потрібні ще якісь зміни?
+        """.strip()
+
+    def _handle_change_segments(self, user_feedback: str) -> str:
+        """Handle editing information about audience segments"""
+        self.state["audience_modification_count"] += 1
+        
+        current_segments = self.state["audience_analysis"].get("segments", "")
+        
+        update_prompt = f"""
+        Поточний аналіз аудиторії: {current_segments}
+        
+        Користувач хоче внести наступні зміни: {user_feedback}
         
         Оновіть аналіз аудиторії, включивши нову інформацію від користувача.
         Зберігайте структуру та стиль оригінального аналізу.
@@ -877,6 +922,8 @@ class InteractiveSpeakerPrepAgent:
     def _generate_recommendation(self) -> str:
         """Generate final recommendation for the speaker"""
         speaker_info = self.state.get("speaker_info", {})
+        audience_analysis = self.state.get("audience_analysis", {})
+        knowledge_assessment = self.state.get("knowledge_assessment", {})
         
         print("\n💡 Генерую рекомендації...")
         
@@ -885,6 +932,8 @@ class InteractiveSpeakerPrepAgent:
             recommendation_prompt = f"""
             Спікер виступає на тему: {speaker_info.get('topic')}
             Його мета: {speaker_info.get('goal')}
+            Аудиторія: {audience_analysis.get('segments', '')}
+            Знання аудиторії: {knowledge_assessment.get('content', '')}
             
             Сформулюй ключову думку, яку аудиторія має винести з виступу для досягнення мети спікера.
             Включи елементи: інноваційність, доступність, приналежність, терміновість.
@@ -894,20 +943,246 @@ class InteractiveSpeakerPrepAgent:
             response = self.llm.invoke([HumanMessage(content=recommendation_prompt)])
             
             self.state["final_recommendation"] = response.content
-            self.state["analysis_complete"] = True
             
-            final_message = f"""
+            return f"""
 Для досягнення твоєї цілі, я вважаю, що аудиторія має винести з виступу наступну основну думку:
 
 "{response.content}"
 
-Згоден?
-            """
-            
-            return final_message.strip()
+Чи згоден ти з цією рекомендацією? Можливо щось треба змінити або доповнити?
+            """.strip()
             
         except Exception as e:
             return f"Помилка при генерації рекомендацій: {e}"
+        
+    def _process_recommendation_feedback(self) -> str:
+        """Process user feedback about final recommendation"""
+        last_message = self.state["messages"][-1]
+        user_feedback = last_message.content.strip()
+        
+        print("\n🤔 Аналізую ваш відгук про рекомендацію...")
+        
+        # Prevent infinite loops
+        if self.state["recommendation_modification_count"] >= 3:
+            self.state["recommendation_approved"] = True
+            self.state["analysis_complete"] = True
+            return "Завершуємо аналіз з поточною рекомендацією. Успіхів з виступом!"
+        
+        try:
+            # Analyze user intent
+            intent = self._analyze_recommendation_intent(user_feedback)
+            
+            if intent == "APPROVE":
+                self.state["recommendation_approved"] = True
+                self.state["analysis_complete"] = True
+                return "Чудово! Аналіз завершено. Успіхів з виступом!"
+                
+            elif intent == "MODIFY":
+                return self._handle_modify_recommendation(user_feedback)
+                
+            elif intent == "ADD_ELEMENTS":
+                return self._handle_add_recommendation_elements(user_feedback)
+                
+            elif intent == "CHANGE_FOCUS":
+                return self._handle_change_recommendation_focus(user_feedback)
+                
+            elif intent == "REWRITE":
+                return self._handle_rewrite_recommendation()
+                
+            elif intent == "REGENERATE":
+                return self._handle_regenerate_recommendation()
+                
+            else:
+                return self._handle_unclear_recommendation_feedback()
+                
+        except Exception as e:
+            print(f"⚠️ Помилка обробки відгуку: {e}")
+            return "Вибачте, не зрозумів ваш відгук. Чи можете уточнити що ви хочете змінити в рекомендації?"
+
+    def _analyze_recommendation_intent(self, user_feedback: str) -> str:
+        """Analyze what user wants to do with recommendation"""
+        intent_prompt = f"""
+        Користувач дав відгук про фінальну рекомендацію: "{user_feedback}"
+        
+        Визнач намір користувача:
+        - APPROVE: користувач схвалює рекомендацію (згоден, добре, так, підходить, etc.)
+        - MODIFY: хоче змінити формулювання (переформулювати, інакше, змінити, etc.)
+        - ADD_ELEMENTS: хоче додати елементи (додати, включити, ще треба, etc.)
+        - CHANGE_FOCUS: хоче змінити фокус/акцент (більше про, менше про, акцент на, etc.)
+        - REWRITE: хоче написати рекомендацію сам (сам напишу, по-своєму, etc.)
+        - REGENERATE: хоче щоб агент перегенерував (заново, інший варіант, etc.)
+        - UNCLEAR: незрозумілий відгук
+        
+        Відповідь лише одним словом: APPROVE, MODIFY, ADD_ELEMENTS, CHANGE_FOCUS, REWRITE, REGENERATE, або UNCLEAR
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=intent_prompt)])
+        return response.content.strip().upper()
+
+    def _handle_modify_recommendation(self, user_feedback: str) -> str:
+        """Handle modifying recommendation based on feedback"""
+        self.state["recommendation_modification_count"] += 1
+        
+        current_recommendation = self.state.get("final_recommendation", "")
+        speaker_info = self.state.get("speaker_info", {})
+        
+        modify_prompt = f"""
+        Поточна рекомендація: {current_recommendation}
+        
+        Користувач хоче змінити: {user_feedback}
+        
+        Мета спікера: {speaker_info.get('goal', '')}
+        Тема: {speaker_info.get('topic', '')}
+        
+        Переформулюйте рекомендацію відповідно до побажань користувача.
+        Зберігайте фокус на досягненні мети спікера.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=modify_prompt)])
+        updated_recommendation = response.content
+        
+        self.state["final_recommendation"] = updated_recommendation
+        
+        return f"""
+    Оновлена рекомендація:
+
+    "{updated_recommendation}"
+
+    Тепер підходить?
+        """.strip()
+
+    def _handle_add_recommendation_elements(self, user_feedback: str) -> str:
+        """Handle adding elements to recommendation"""
+        self.state["recommendation_modification_count"] += 1
+        
+        current_recommendation = self.state.get("final_recommendation", "")
+        
+        add_prompt = f"""
+        Поточна рекомендація: {current_recommendation}
+        
+        Користувач хоче додати: {user_feedback}
+        
+        Доповніть рекомендацію новими елементами, які запросив користувач.
+        Зберігайте цілісність та логіку оригінальної рекомендації.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=add_prompt)])
+        updated_recommendation = response.content
+        
+        self.state["final_recommendation"] = updated_recommendation
+        
+        return f"""
+    Доповнена рекомендація:
+
+    "{updated_recommendation}"
+
+    Чи потрібні ще якісь доповнення?
+        """.strip()
+
+    def _handle_change_recommendation_focus(self, user_feedback: str) -> str:
+        """Handle changing focus of recommendation"""
+        self.state["recommendation_modification_count"] += 1
+        
+        current_recommendation = self.state.get("final_recommendation", "")
+        speaker_info = self.state.get("speaker_info", {})
+        audience_analysis = self.state.get("audience_analysis", {})
+        
+        focus_prompt = f"""
+        Поточна рекомендація: {current_recommendation}
+        
+        Користувач хоче змінити фокус: {user_feedback}
+        
+        Контекст:
+        - Мета спікера: {speaker_info.get('goal', '')}
+        - Тема: {speaker_info.get('topic', '')}
+        - Аудиторія: {audience_analysis.get('segments', '')[:200]}...
+        
+        Переформулюйте рекомендацію зі зміненим фокусом відповідно до побажань користувача.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=focus_prompt)])
+        updated_recommendation = response.content
+        
+        self.state["final_recommendation"] = updated_recommendation
+        
+        return f"""
+    Рекомендація зі зміненим фокусом:
+
+    "{updated_recommendation}"
+
+    Такий акцент більше підходить?
+        """.strip()
+
+    def _handle_rewrite_recommendation(self) -> str:
+        """Handle user wanting to write recommendation themselves"""
+        self.state["recommendation_modification_count"] += 1
+        
+        speaker_info = self.state.get("speaker_info", {})
+        
+        return f"""
+    Зрозуміло! Сформулюйте ключову думку, яку аудиторія має винести з вашого виступу.
+
+    Нагадую контекст:
+    - Тема: {speaker_info.get('topic', '')}
+    - Мета: {speaker_info.get('goal', '')}
+
+    Напишіть вашу рекомендацію:
+        """.strip()
+
+    def _handle_regenerate_recommendation(self) -> str:
+        """Handle regenerating recommendation"""
+        self.state["recommendation_modification_count"] += 1
+        
+        print("\n🔄 Генерую нову рекомендацію...")
+        
+        speaker_info = self.state.get("speaker_info", {})
+        audience_analysis = self.state.get("audience_analysis", {})
+        knowledge_assessment = self.state.get("knowledge_assessment", {})
+        
+        regenerate_prompt = f"""
+        Створіть НОВУ рекомендацію для виступу:
+        
+        Тема виступу: {speaker_info.get('topic', 'Невідома')}
+        Мета спікера: {speaker_info.get('goal', 'Невідома')}
+        Аудиторія: {audience_analysis.get('segments', '')}
+        Знання аудиторії: {knowledge_assessment.get('content', '')}
+        
+        Використайте інший підхід до формулювання ключової думки.
+        Розгляньте різні аспекти: емоційний вплив, практична цінність, call-to-action тощо.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=regenerate_prompt)])
+        new_recommendation = response.content
+        
+        self.state["final_recommendation"] = new_recommendation
+        
+        return f"""
+    Нова рекомендація:
+
+    "{new_recommendation}"
+
+    Чи підходить такий варіант?
+        """.strip()
+
+    def _handle_unclear_recommendation_feedback(self) -> str:
+        """Handle unclear user feedback about recommendation"""
+        return """
+    Не зовсім зрозумів що ви хочете змінити в рекомендації. Ви можете:
+
+    • Схвалити: "згоден, підходить"
+    • Змінити формулювання: "переформулюй інакше"
+    • Додати елементи: "додай ще про..."
+    • Змінити фокус: "більше акценту на..."
+    • Написати самому: "я сам сформулюю"
+    • Перегенерувати: "запропонуй інший варіант"
+
+    Що саме ви хочете зробити з рекомендацією?
+        """.strip()
+
     
     def _display_agent_message(self, message: str):
         """Display agent message with nice formatting"""
@@ -936,16 +1211,16 @@ class InteractiveSpeakerPrepAgent:
         
         event_info = self.state.get("event_info", {})
         speaker_info = self.state.get("speaker_info", {})
-        audience_analysis = self.state.get("audience_analysis", {})
         
         print(f"🎯 Подія: {event_info.get('event_name', 'Невідома')}")
         print(f"📅 Дата: {event_info.get('dates', 'Уточнюється')}")
         print(f"📝 Тема: {speaker_info.get('topic', 'Невідома')}")
         print(f"🎯 Мета: {speaker_info.get('goal', 'Невідома')}")
-        print(f"👥 Аудиторія: {len(audience_analysis.get('segments', ''))} символів аналізу")
         print(f"💡 Рекомендація: {self.state.get('final_recommendation', 'Відсутня')[:100]}...")
+
         
         print("\n✨ Успіхів з виступом!")
+
     
     def get_current_state(self):
         """Get current conversation state"""
