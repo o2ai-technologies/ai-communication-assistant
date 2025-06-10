@@ -32,6 +32,7 @@ class InteractiveSpeakerPrepAgent:
             "analyze_audience",
             "process_audience_feedback",
             "assess_knowledge", 
+            "process_knowledge_feedback", 
             "generate_recommendation"
         ]
         self.current_step_index = 0
@@ -47,7 +48,10 @@ class InteractiveSpeakerPrepAgent:
             "final_recommendation": "",
             "waiting_for_input": False,
             "audience_approved": False,
-            "audience_modification_count": 0
+            "audience_modification_count": 0,
+            "knowledge_approved": False,
+            "knowledge_modification_count": 0,
+            "knowledge_assessment": {},
         }
         
     def start_conversation(self):
@@ -100,10 +104,12 @@ class InteractiveSpeakerPrepAgent:
         # Add user message to state
         self.state["messages"].append(HumanMessage(content=user_input))
         
-        # Special handling for audience feedback step
-        if (self.current_step_index < len(self.conversation_steps) and 
-            self.conversation_steps[self.current_step_index] == "process_audience_feedback"):
-            
+        current_step_name = None
+        if self.current_step_index < len(self.conversation_steps):
+            current_step_name = self.conversation_steps[self.current_step_index]
+        
+        # Special handling for feedback steps
+        if current_step_name == "process_audience_feedback":
             # Execute audience feedback processing
             response = self._execute_step("process_audience_feedback")
             
@@ -112,15 +118,27 @@ class InteractiveSpeakerPrepAgent:
             
             # Check if we should continue or stay in feedback loop
             if not self.state.get("audience_approved", False):
-                # Stay in the same step for more feedback
-                return
+                return  # Stay in the same step for more feedback
             else:
-                # Move to next step
-                self.current_step_index += 1
+                self.current_step_index += 1  # Move to next step
+                
+        elif current_step_name == "process_knowledge_feedback":
+            # Execute knowledge feedback processing
+            response = self._execute_step("process_knowledge_feedback")
+            
+            if response:
+                self._display_agent_message(response)
+            
+            # Check if we should continue or stay in feedback loop
+            if not self.state.get("knowledge_approved", False):
+                return  # Stay in the same step for more feedback
+            else:
+                self.current_step_index += 1  # Move to next step
         else:
             # Normal step progression
             self.current_step_index += 1
         
+        # Continue with normal flow
         if self.current_step_index < len(self.conversation_steps):
             current_step = self.conversation_steps[self.current_step_index]
             self.state["current_step"] = current_step
@@ -133,11 +151,12 @@ class InteractiveSpeakerPrepAgent:
         else:
             # Conversation completed
             self.state["analysis_complete"] = True
-            if self.state.get("final_recommendation"):  # Only show summary if we completed full analysis
+            if self.state.get("final_recommendation"):
                 print("\n✅ Аналіз завершено!")
                 self._show_summary()
             else:
                 print("\n👋 До побачення!")
+
 
     
     def _execute_step(self, step: str) -> Optional[str]:
@@ -163,11 +182,14 @@ class InteractiveSpeakerPrepAgent:
         elif step == "analyze_audience":
             return self._analyze_audience()
         
-        elif step == "process_audience_feedback":  # NEW
+        elif step == "process_audience_feedback":
             return self._process_audience_feedback()
             
         elif step == "assess_knowledge":
             return self._assess_knowledge()
+        
+        elif step == "process_knowledge_feedback":
+            return self._process_knowledge_feedback()
             
         elif step == "generate_recommendation":
             return self._generate_recommendation()
@@ -263,12 +285,14 @@ class InteractiveSpeakerPrepAgent:
             system_prompt = """
             Ти допомагаєш спікеру підготуватися до виступу. 
             Проаналізуй результати пошуку про конференцію і витягни ключову інформацію:
-            - Дати проведення
-            - Місце проведення  
-            - Тематика конференції
-            - Очікувана кількість відвідувачів
-            - Стейджі/секції якщо є
-            - Цільова аудиторія
+            - Назва події (event_name)
+            - Дати проведення (dates)
+            - Місце проведення (place)
+            - Тематика конференції (theme)
+            - Очікувана кількість відвідувачів (attendees)
+            - Стейджі/секції якщо є (stages)
+            - Цільова аудиторія (target_audience)
+            Якщо для поля відсутня інформація - запиши None як значення цього поля.
             
             Поверни результат у JSON форматі.
             """
@@ -624,19 +648,231 @@ class InteractiveSpeakerPrepAgent:
             
             response = self.llm.invoke([HumanMessage(content=assessment_prompt)])
             
+            # Store the knowledge assessment
+            self.state["knowledge_assessment"] = {"content": response.content}
+            
             confirmation = f"""
 Для підготовки якісного спіча нам треба зрозуміти що аудиторія вже зараз знає про заявлену тему.
 
 На мою думку зараз аудиторія твого виступу:
 {response.content}
 
-Ти згоден?
+Ти згоден з цією оцінкою знань аудиторії?
             """
             
             return confirmation.strip()
             
         except Exception as e:
             return f"Помилка при оцінці знань: {e}. Продовжуємо далі..."
+        
+    def _process_knowledge_feedback(self) -> str:
+        """Process user feedback about knowledge assessment"""
+        last_message = self.state["messages"][-1]
+        user_feedback = last_message.content.strip()
+        
+        print("\n🤔 Аналізую ваш відгук про оцінку знань...")
+        
+        # Prevent infinite loops
+        if self.state["knowledge_modification_count"] >= 3:
+            self.state["knowledge_approved"] = True
+            return "Продовжуємо з поточною оцінкою знань аудиторії."
+        
+        try:
+            # Analyze user intent
+            intent = self._analyze_knowledge_intent(user_feedback)
+            
+            if intent == "AGREE":
+                self.current_step_index += 1
+                self.state["knowledge_approved"] = True
+                return self._generate_recommendation()
+                
+            elif intent == "ADD_KNOWLEDGE":
+                return self._handle_add_knowledge(user_feedback)
+                
+            elif intent == "REMOVE_KNOWLEDGE":
+                return self._handle_remove_knowledge(user_feedback)
+                
+            elif intent == "CORRECT_KNOWLEDGE":
+                return self._handle_correct_knowledge(user_feedback)
+                
+            elif intent == "REWRITE_KNOWLEDGE":
+                return self._handle_rewrite_knowledge()
+                
+            elif intent == "REGENERATE_KNOWLEDGE":
+                return self._handle_regenerate_knowledge()
+                
+            else:
+                return self._handle_unclear_knowledge_feedback()
+                
+        except Exception as e:
+            print(f"⚠️ Помилка обробки відгуку: {e}")
+            return "Вибачте, не зрозумів ваш відгук. Чи можете уточнити що ви хочете змінити в оцінці знань аудиторії?"
+
+    def _analyze_knowledge_intent(self, user_feedback: str) -> str:
+        """Analyze what user wants to do with knowledge assessment"""
+        intent_prompt = f"""
+        Користувач дав відгук про оцінку знань аудиторії: "{user_feedback}"
+        
+        Визнач намір користувача:
+        - AGREE: користувач згоден з оцінкою (так, згоден, правильно, точно, etc.)
+        - ADD_KNOWLEDGE: хоче додати що аудиторія ще знає (також знають, ще є, додати, etc.)
+        - REMOVE_KNOWLEDGE: вважає що щось зайве (не знають, прибрати, видалити, etc.)
+        - CORRECT_KNOWLEDGE: хоче виправити неточності (не так, насправді, виправити, etc.)
+        - REWRITE_KNOWLEDGE: хоче написати оцінку сам (сам напишу, по-своєму, інакше, etc.)
+        - REGENERATE_KNOWLEDGE: хоче щоб агент перегенерував (заново, по-новому, інший варіант, etc.)
+        - UNCLEAR: незрозумілий відгук
+        
+        Відповідь лише одним словом: AGREE, ADD_KNOWLEDGE, REMOVE_KNOWLEDGE, CORRECT_KNOWLEDGE, REWRITE_KNOWLEDGE, REGENERATE_KNOWLEDGE, або UNCLEAR
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=intent_prompt)])
+        return response.content.strip().upper()
+
+    def _handle_add_knowledge(self, user_feedback: str) -> str:
+        """Handle adding knowledge information"""
+        self.state["knowledge_modification_count"] += 1
+        
+        current_assessment = self.state["knowledge_assessment"].get("content", "")
+        
+        update_prompt = f"""
+        Поточна оцінка знань аудиторії: {current_assessment}
+        
+        Користувач хоче додати інформацію про знання аудиторії: {user_feedback}
+        
+        Оновіть оцінку знань, включивши нову інформацію від користувача.
+        Зберігайте структуру та стиль оригінальної оцінки.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=update_prompt)])
+        updated_assessment = response.content
+        
+        self.state["knowledge_assessment"]["content"] = updated_assessment
+        
+        return f"""
+    Оновлена оцінка знань аудиторії:
+
+    {updated_assessment}
+
+    Чи потрібні ще якісь зміни в оцінці знань?
+        """.strip()
+
+    def _handle_remove_knowledge(self, user_feedback: str) -> str:
+        """Handle removing knowledge information"""
+        self.state["knowledge_modification_count"] += 1
+        
+        current_assessment = self.state["knowledge_assessment"].get("content", "")
+        
+        remove_prompt = f"""
+        Поточна оцінка знань аудиторії: {current_assessment}
+        
+        Користувач вважає що треба прибрати/виправити: {user_feedback}
+        
+        Оновіть оцінку знань, видаливши або виправивши зазначену інформацію.
+        Зберігайте структуру та стиль оригінальної оцінки.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=remove_prompt)])
+        updated_assessment = response.content
+        
+        self.state["knowledge_assessment"]["content"] = updated_assessment
+        
+        return f"""
+    Оновлена оцінка знань аудиторії:
+
+    {updated_assessment}
+
+    Чи потрібні ще якісь зміни в оцінці знань?
+        """.strip()
+
+    def _handle_correct_knowledge(self, user_feedback: str) -> str:
+        """Handle correcting knowledge assessment"""
+        self.state["knowledge_modification_count"] += 1
+        
+        current_assessment = self.state["knowledge_assessment"].get("content", "")
+        
+        correct_prompt = f"""
+        Поточна оцінка знань аудиторії: {current_assessment}
+        
+        Користувач хоче виправити/уточнити: {user_feedback}
+        
+        Виправте оцінку знань відповідно до зауважень користувача.
+        Зберігайте структуру та стиль оригінальної оцінки.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=correct_prompt)])
+        updated_assessment = response.content
+        
+        self.state["knowledge_assessment"]["content"] = updated_assessment
+        
+        return f"""
+    Виправлена оцінка знань аудиторії:
+
+    {updated_assessment}
+
+    Тепер все правильно?
+        """.strip()
+
+    def _handle_rewrite_knowledge(self) -> str:
+        """Handle user wanting to write knowledge assessment themselves"""
+        self.state["knowledge_modification_count"] += 1
+        
+        return """
+    Зрозуміло! Опишіть що ваша аудиторія вже знає про тему виступу, а що їй потрібно дізнатися.
+    Включіть рівень експертизи, досвід, поточні знання тощо.
+        """.strip()
+
+    def _handle_regenerate_knowledge(self) -> str:
+        """Handle regenerating knowledge assessment"""
+        self.state["knowledge_modification_count"] += 1
+        
+        print("\n🔄 Генерую нову оцінку знань аудиторії...")
+        
+        speaker_info = self.state.get("speaker_info", {})
+        audience_analysis = self.state.get("audience_analysis", {})
+        
+        regenerate_prompt = f"""
+        Створіть НОВУ оцінку знань аудиторії для виступу:
+        
+        Тема виступу: {speaker_info.get('topic', 'Невідома')}
+        Мета спікера: {speaker_info.get('goal', 'Невідома')}
+        Аудиторія: {audience_analysis.get('segments', '')}
+        
+        Використайте інший підхід до оцінки знань аудиторії.
+        Розгляньте різні аспекти: теоретичні знання, практичний досвід, поточні тренди, etc.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=regenerate_prompt)])
+        new_assessment = response.content
+        
+        self.state["knowledge_assessment"]["content"] = new_assessment
+        
+        return f"""
+    Нова оцінка знань аудиторії:
+
+    {new_assessment}
+
+    Чи підходить такий варіант оцінки?
+        """.strip()
+
+    def _handle_unclear_knowledge_feedback(self) -> str:
+        """Handle unclear user feedback about knowledge"""
+        return """
+    Не зовсім зрозумів що ви хочете змінити в оцінці знань. Ви можете:
+
+    • Додати знання: "аудиторія також знає про..."
+    • Прибрати щось: "вони не знають про..."  
+    • Виправити: "насправді вони знають..."
+    • Написати самому: "я сам опишу їх знання"
+    • Перегенерувати: "запропонуй інший варіант"
+    • Погодитися: "згоден, все правильно"
+
+    Що саме ви хочете зробити з оцінкою знань?
+        """.strip()
+
     
     def _generate_recommendation(self) -> str:
         """Generate final recommendation for the speaker"""
