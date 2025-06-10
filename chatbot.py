@@ -30,6 +30,7 @@ class InteractiveSpeakerPrepAgent:
             "clarify_goal",
             "ask_stage",
             "analyze_audience",
+            "process_audience_feedback",
             "assess_knowledge", 
             "generate_recommendation"
         ]
@@ -44,7 +45,9 @@ class InteractiveSpeakerPrepAgent:
             "current_step": "greeting",
             "audience_analysis": {},
             "final_recommendation": "",
-            "waiting_for_input": False
+            "waiting_for_input": False,
+            "audience_approved": False,
+            "audience_modification_count": 0
         }
         
     def start_conversation(self):
@@ -97,8 +100,26 @@ class InteractiveSpeakerPrepAgent:
         # Add user message to state
         self.state["messages"].append(HumanMessage(content=user_input))
         
-        # Move to next step
-        self.current_step_index += 1
+        # Special handling for audience feedback step
+        if (self.current_step_index < len(self.conversation_steps) and 
+            self.conversation_steps[self.current_step_index] == "process_audience_feedback"):
+            
+            # Execute audience feedback processing
+            response = self._execute_step("process_audience_feedback")
+            
+            if response:
+                self._display_agent_message(response)
+            
+            # Check if we should continue or stay in feedback loop
+            if not self.state.get("audience_approved", False):
+                # Stay in the same step for more feedback
+                return
+            else:
+                # Move to next step
+                self.current_step_index += 1
+        else:
+            # Normal step progression
+            self.current_step_index += 1
         
         if self.current_step_index < len(self.conversation_steps):
             current_step = self.conversation_steps[self.current_step_index]
@@ -141,6 +162,9 @@ class InteractiveSpeakerPrepAgent:
             
         elif step == "analyze_audience":
             return self._analyze_audience()
+        
+        elif step == "process_audience_feedback":  # NEW
+            return self._process_audience_feedback()
             
         elif step == "assess_knowledge":
             return self._assess_knowledge()
@@ -178,6 +202,7 @@ class InteractiveSpeakerPrepAgent:
             elif intent == "NEGATIVE":
                 return self._handle_negative_response()
             else:  # UNCLEAR
+                self.current_step_index -= 1
                 return "Вибач, не зовсім зрозумів. Ти готуєшся до якогось виступу чи презентації? (так/ні)"
                 
         except Exception as e:
@@ -292,12 +317,7 @@ class InteractiveSpeakerPrepAgent:
                 HumanMessage(content=analysis_prompt)
             ])
             
-            #Create response message
-            time_info = ""
-            if "дата" in str(event_info).lower() or "date" in str(event_info).lower():
-                time_info = "Я бачу що в тебе є час на підготовку. "
-            
-            return f"{response.content}\n\n{time_info}Тепер розкажи, яка тема твого виступу?"
+            return response.content
             
         except Exception as e:
             print(f"⚠️  Помилка при пошуку: {e}")
@@ -409,6 +429,181 @@ class InteractiveSpeakerPrepAgent:
             
         except Exception as e:
             return f"Помилка при аналізі аудиторії: {e}. Продовжуємо далі..."
+        
+    def _process_audience_feedback(self) -> str:
+        """Process user feedback about audience segments"""
+        last_message = self.state["messages"][-1]
+        user_feedback = last_message.content.strip()
+        
+        print("\n🤔 Аналізую ваш відгук...")
+        
+        # Prevent infinite loops
+        if self.state["audience_modification_count"] >= 3:
+            self.state["audience_approved"] = True
+            return "Продовжуємо з поточним аналізом аудиторії."
+        
+        try:
+            # Analyze user intent
+            intent = self._analyze_user_intent(user_feedback)
+            
+            if intent == "CONTINUE":
+                self.state["audience_approved"] = True
+                return "Чудово! Переходимо до наступного етапу."
+                
+            elif intent == "ADD":
+                return self._handle_add_segments(user_feedback)
+                
+            elif intent == "REMOVE":
+                return self._handle_remove_segments(user_feedback)
+                
+            elif intent == "REWRITE":
+                return self._handle_rewrite_segments()
+                
+            elif intent == "REGENERATE":
+                return self._handle_regenerate_segments()
+                
+            else:
+                return self._handle_unclear_feedback()
+                
+        except Exception as e:
+            print(f"⚠️ Помилка обробки відгуку: {e}")
+            return "Вибачте, не зрозумів ваш відгук. Чи можете уточнити що ви хочете змінити в аналізі аудиторії?"
+
+
+    def _analyze_user_intent(self, user_feedback: str) -> str:
+        """Analyze what user wants to do with audience segments"""
+        intent_prompt = f"""
+        Користувач дав відгук про аналіз аудиторії: "{user_feedback}"
+        
+        Визнач намір користувача:
+        - CONTINUE: користувач задоволений і хоче продовжити (так, добре, згоден, продовжуємо, etc.)
+        - ADD: хоче додати інформацію (додати, ще є, також, включити, etc.)
+        - REMOVE: хоче видалити щось (видалити, прибрати, не потрібно, зайве, etc.)
+        - REWRITE: хоче написати сегменти сам (сам напишу, по-своєму, інакше, etc.)
+        - REGENERATE: хоче щоб агент перегенерував (заново, по-новому, інший варіант, etc.)
+        - UNCLEAR: незрозумілий відгук
+        
+        Відповідь лише одним словом: CONTINUE, ADD, REMOVE, REWRITE, REGENERATE, або UNCLEAR
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=intent_prompt)])
+        return response.content.strip().upper()
+
+    def _handle_add_segments(self, user_feedback: str) -> str:
+        """Handle adding information to audience segments"""
+        self.state["audience_modification_count"] += 1
+        
+        current_segments = self.state["audience_analysis"].get("segments", "")
+        
+        update_prompt = f"""
+        Поточний аналіз аудиторії: {current_segments}
+        
+        Користувач хоче додати: {user_feedback}
+        
+        Оновіть аналіз аудиторії, включивши нову інформацію від користувача.
+        Зберігайте структуру та стиль оригінального аналізу.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=update_prompt)])
+        updated_segments = response.content
+        
+        self.state["audience_analysis"]["segments"] = updated_segments
+        
+        return f"""
+    Оновлений аналіз аудиторії:
+
+    {updated_segments}
+
+    Чи потрібні ще якісь зміни?
+        """.strip()
+
+    def _handle_remove_segments(self, user_feedback: str) -> str:
+        """Handle removing information from audience segments"""
+        self.state["audience_modification_count"] += 1
+        
+        current_segments = self.state["audience_analysis"].get("segments", "")
+        
+        remove_prompt = f"""
+        Поточний аналіз аудиторії: {current_segments}
+        
+        Користувач хоче видалити/прибрати: {user_feedback}
+        
+        Оновіть аналіз аудиторії, видаливши зазначену інформацію.
+        Зберігайте структуру та стиль оригінального аналізу.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=remove_prompt)])
+        updated_segments = response.content
+        
+        self.state["audience_analysis"]["segments"] = updated_segments
+        
+        return f"""
+    Оновлений аналіз аудиторії:
+
+    {updated_segments}
+
+    Чи потрібні ще якісь зміни?
+        """.strip()
+
+    def _handle_rewrite_segments(self) -> str:
+        """Handle user wanting to write segments themselves"""
+        self.state["audience_modification_count"] += 1
+        
+        return """
+    Зрозуміло! Опишіть аудиторію вашого виступу так, як ви її бачите.
+    Включіть сегменти, їх характеристики, кількість тощо.
+        """.strip()
+
+    def _handle_regenerate_segments(self) -> str:
+        """Handle regenerating audience segments"""
+        self.state["audience_modification_count"] += 1
+        
+        print("\n🔄 Генерую новий аналіз аудиторії...")
+        
+        event_info = self.state.get("event_info", {})
+        speaker_info = self.state.get("speaker_info", {})
+        
+        regenerate_prompt = f"""
+        Створіть НОВИЙ аналіз аудиторії для виступу:
+        
+        Конференція: {event_info.get('event_name', 'Невідома')}
+        Тема виступу: {speaker_info.get('topic', 'Невідома')}
+        Мета спікера: {speaker_info.get('goal', 'Невідома')}
+        
+        Використайте інший підхід до сегментації аудиторії.
+        Розгляньте різні критерії: досвід, посади, інтереси, мотивація тощо.
+        Відповідь українською мовою.
+        """
+        
+        response = self.llm.invoke([HumanMessage(content=regenerate_prompt)])
+        new_segments = response.content
+        
+        self.state["audience_analysis"]["segments"] = new_segments
+        
+        return f"""
+    Новий аналіз аудиторії:
+
+    {new_segments}
+
+    Чи підходить такий варіант?
+        """.strip()
+
+    def _handle_unclear_feedback(self) -> str:
+        """Handle unclear user feedback"""
+        return """
+    Не зовсім зрозумів що ви хочете змінити. Ви можете:
+
+    • Додати інформацію: "додай ще студентів"
+    • Видалити щось: "прибери частину про..."  
+    • Написати самому: "я сам опишу аудиторію"
+    • Перегенерувати: "запропонуй інший варіант"
+    • Продовжити: "все добре, продовжуємо"
+
+    Що саме ви хочете зробити?
+        """.strip()
+
     
     def _assess_knowledge(self) -> str:
         """Assess what audience currently knows about the topic"""
