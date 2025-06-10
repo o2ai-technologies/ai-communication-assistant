@@ -1,0 +1,7 @@
+# Project Dependencies
+langchain
+langchain-google-genai
+langchain-community
+langchain-tavily
+langgraph
+tavily-python
