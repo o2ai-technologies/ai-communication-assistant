@@ -1212,10 +1212,12 @@ class InteractiveSpeakerPrepAgent:
         event_info = self.state.get("event_info", {})
         speaker_info = self.state.get("speaker_info", {})
         
-        print(f"🎯 Подія: {event_info.get('event_name', 'Невідома')}")
+        print(f"✨ Подія: {event_info.get('event_name', 'Невідомо')}")
         print(f"📅 Дата: {event_info.get('dates', 'Уточнюється')}")
-        print(f"📝 Тема: {speaker_info.get('topic', 'Невідома')}")
-        print(f"🎯 Мета: {speaker_info.get('goal', 'Невідома')}")
+        print(f"📍 Місце: {event_info.get('place', 'Невідомо')}")
+        print(f"🫂 Учасники: {event_info.get('attendees', 'Невідомо')}")
+        print(f"📝 Тема: {speaker_info.get('topic', 'Невідомо')}")
+        print(f"🎯 Мета: {speaker_info.get('goal', 'Невідомо')}")
         print(f"💡 Рекомендація: {self.state.get('final_recommendation', 'Відсутня')[:100]}...")
 
         
