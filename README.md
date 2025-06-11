@@ -47,15 +47,26 @@ The tool guides users through a structured conversation to:
 - Error handling with user-friendly messages
 - Progress indicators and status updates
 
+### 5. **Chainlit Web Interface**
+- Modern web-based chat interface
+- Real-time message updates
+- Improved user experience over console-based interaction
+- Persistent chat history during session
+- Emoji support for better visual communication
+
 ## 🛠️ Installation & Setup:
 
 ```bash
 # Install dependencies
-pip install langchain langchain-google-genai langchain-community langgraph tavily-python
+pip install langchain langchain-google-genai langchain-community langgraph tavily-python chainlit
 
 # Set environment variables
 export GOOGLE_API_KEY="your-gemini-api-key"
 export TAVILY_API_KEY="your-tavily-api-key"
 
-# Run the application
+# Run the console application
 python chatbot.py
+
+# OR run the web interface with Chainlit
+chainlit run chainlit_demo_app.py
+```
