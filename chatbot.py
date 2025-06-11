@@ -1,10 +1,12 @@
 from typing import Dict, List, Optional, TypedDict, Annotated
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.tools import TavilySearchResults
 from langchain.schema import BaseMessage
 import operator
 from langchain_core.utils.json import parse_json_markdown
+
+LLM_MODEL_NAME="models/gemma-3-27b-it"
 
 # State definition
 class AgentState(TypedDict):
@@ -18,7 +20,7 @@ class AgentState(TypedDict):
     waiting_for_input: bool
 
 class InteractiveSpeakerPrepAgent:
-    def __init__(self, gemini_model="gemini-2.0-flash-lite"):
+    def __init__(self, gemini_model=LLM_MODEL_NAME):
         self.llm = ChatGoogleGenerativeAI(model=gemini_model, temperature=0.7)
         self.search_tool = TavilySearchResults(max_results=5)
         self.state = self._initialize_state()
@@ -305,14 +307,13 @@ class InteractiveSpeakerPrepAgent:
             - Цільова аудиторія (target_audience)
             Якщо для поля відсутня інформація - запиши None як значення цього поля.
             
-            Поверни результат у JSON форматі.
+            Поверни результат у JSON форматі.\n
             """
             
             analysis_prompt = f"Результати пошуку про {event_name}:\n{search_text}"
             
             response = self.llm.invoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=analysis_prompt)
+                HumanMessage(content=system_prompt + analysis_prompt)
             ])
             
             try:
@@ -344,12 +345,11 @@ class InteractiveSpeakerPrepAgent:
             Якщо якась інформація не знайдена, не згадуй про неї.
             Заверши повідомлення питанням про тему виступу.
             
-            Формат відповіді має бути природним та розмовним, ніби ти розповідаєш другу.
+            Формат відповіді має бути природним та розмовним, ніби ти розповідаєш другу.\n
             """
             
             response = self.llm.invoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=analysis_prompt)
+                HumanMessage(content=system_prompt + analysis_prompt)
             ])
             
             return response.content
