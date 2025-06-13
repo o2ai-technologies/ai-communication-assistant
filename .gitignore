@@ -5,3 +5,9 @@ __pycache__
 
 # chainlit translations
 .chainlit
+
+.clinerules/
+.vscode/
+
+
+.langgraph_api/
