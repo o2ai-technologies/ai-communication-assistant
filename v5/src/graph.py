@@ -1,13 +1,13 @@
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, SystemMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph import MessagesState
 from src.llm import llm
 from src import prompts
+from src.event import EventDetails
 from langchain_tavily import TavilySearch
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
-from pydantic import BaseModel
-from typing import Optional, Literal
+from langchain_core.prompts import PromptTemplate
 
 
 tool = TavilySearch(max_results=10)
@@ -34,94 +34,41 @@ class Event(BaseModel):
     
 
 class GraphState(MessagesState):
-    event: Event = Event()
+    event: EventDetails
 
 memory = MemorySaver()
 builder = StateGraph(GraphState)
 
-def interview_node(state: GraphState) -> GraphState:
-    event = state.get("event", None)
-    
-    sys_prompt = prompts.context_builder_sys_prompt.format(event=event)
-    ai_response = llm_with_tools.invoke([sys_prompt] + state["messages"])
+def interview(state: GraphState) -> GraphState:
+    event_info = state["event"] if "event" in state else EventDetails()
+    sys_prompt = PromptTemplate.from_template(prompts.context_builder_sys_prompt).invoke({"event_info": event_info}).to_string()
 
-    return {"messages": [ai_response],}
-    
-def human_input_node(state: GraphState) -> GraphState:
-    pass
-    
-def parsing_node(state: GraphState) -> GraphState:
-    messages = state["messages"]
-    last_human_message = messages[-1] if messages else None
-    event = state.get("event", None)
-    parsing_instructions = prompts.parsing_interview_prompt.format(event=event,last_human_message=last_human_message, messages=messages)
-    parsed_response = llm.with_structured_output(Event).invoke([HumanMessage(parsing_instructions)])
-    
+    return {"messages": [llm_with_tools.invoke([HumanMessage(content=sys_prompt)] + state["messages"])]}
 
-    return {"event": parsed_response.model_dump()}
-    
-def final_node(state: GraphState) -> GraphState:
-    messages = state["messages"]
-    last_human_message = messages[-1] if messages else None
-    event = state.get("event", None)
-    parsing_instructions = prompts.finalizing_interview_prompt.format(event=event,last_human_message=last_human_message, messages=messages)
-    parsed_response = llm.with_structured_output(Event).invoke([HumanMessage(parsing_instructions)])
-    return {
-        "messages": [AIMessage(content=f"Вау, круто!\n\nОсь підсумок: {parsed_response.model_dump()}")]
-    }
+def extract_event_info(state: GraphState) -> GraphState:
+    sys_prompt = prompts.event_extractor_prompt
 
-def goodbye_node(state: GraphState) -> GraphState:
-    return {
-        "messages": [AIMessage(content="Шкода, зустрінемось наступного разу.\n")]
-    }
+    # Filter out ToolMessages and combine all other messages into a single text
+    messages_text = "\n\n".join([
+        f"{msg.type.upper()}: {msg.content}"
+        for msg in state["messages"]
+        if not isinstance(msg, ToolMessage)
+    ])
+
+    # Create a single HumanMessage with the combined text
+    combined_message = HumanMessage(content=messages_text)
     
-def is_interview_completed(event: Event) -> bool:
-    if event \
-    and event["is_going"] \
-    and event["event"] \
-    and event["topic"] \
-    and event["goal"] \
-    and event["target_audience"] \
-    and event["audience_knowledge"] \
-    and event["key_message"]:
-        return True
-    return False
-    
-def parsing_route_condition(state: GraphState) -> Literal['final', 'goodbye', 'interview']:
-    """
-    Determines the next step from the 'interview' node.
-    Returns: "tools" if tool calls are present, "final" if no tool calls and the response is conclusive.
-    """
-    event = state.get("event", None)
-    is_going = event.get("is_going", None) if event else None
-    if is_interview_completed(event):
-        state["event"] = Event()
-        return "final"
-    if is_going == False:
-        state["event"] = Event()
-        return "goodbye"
-    
-    return "interview"
-    
-def interview_route_condition(state: GraphState) -> Literal['human_input', 'tools']:
-    """
-    Determines the next step from the 'interview' node.
-    Returns: "tools" if tool calls are present, "final" if no tool calls and the response is conclusive.
-    """
-    last_message = state["messages"][-1]
-    is_tool_calls = isinstance(last_message, AIMessage) and last_message.tool_calls
-    if is_tool_calls:
-        return "tools"
-    
-    return "human_input"
+    structured_llm = llm.with_structured_output(EventDetails)
+    response = structured_llm.invoke([SystemMessage(content=sys_prompt), combined_message])
+
+    return {"event": response.model_dump()}
 
 builder.add_node("interview", interview_node)
 builder.add_node("human_input", human_input_node)
 builder.add_node("parsing", parsing_node)
 tool_node = ToolNode(tools=[tool])
 builder.add_node("tools", tool_node)
-builder.add_node("final", final_node)
-builder.add_node("goodbye", goodbye_node)
+builder.add_node("extractor", extract_event_info)
 
 
 builder.add_edge(START, "interview")
@@ -135,7 +82,7 @@ builder.add_conditional_edges(
     interview_route_condition
 )
 builder.add_edge("tools", "interview")
-builder.add_edge("final", END)
-builder.add_edge("goodbye", END)
+builder.add_edge("interview", "extractor")
+builder.add_edge("extractor", END)
 
-graph = builder.compile(interrupt_before=["human_input"], checkpointer=memory)
+graph = builder.compile()
