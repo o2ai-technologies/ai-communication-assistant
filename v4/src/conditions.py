@@ -1,6 +1,8 @@
 from typing import Literal
-from src.llm_service import llm_service
+from src.services.llm_service import llm_service
 from src.graph_state import GraphState
+from langgraph.graph import END
+from src.nodes import NodeName
 
 def analyse_greeting_feedback(state: GraphState) -> Literal["goodbye", "ask_event", "final"]:
     user_message = state["messages"][-1]
@@ -9,8 +11,9 @@ def analyse_greeting_feedback(state: GraphState) -> Literal["goodbye", "ask_even
     Визнач чи це:
     - POSITIVE: користувач готується до виступу (так, готуюся, yes, звичайно, etc.)
     - EVENT: користувач відповів що готується до виступу і вказав назву події до якої готується (так виступаю на конференції, готуюся до дзвінка з клієнтом, etc.)
-    - NEGATIVE: відповів негативно або незрозуміло
-    Відповідь лише одним словом: POSITIVE, NEGATIVE, або EVENT
+    - NEGATIVE: відповів негативно
+    - UNCLEAR: відповідь незрозуміла або потребує уточнення
+    Відповідь лише одним словом: POSITIVE, NEGATIVE, EVENT або UNCLEAR
     """
     intent = llm_service.invoke(analysis_prompt).strip().upper()
     
@@ -18,5 +21,16 @@ def analyse_greeting_feedback(state: GraphState) -> Literal["goodbye", "ask_even
         return "ask_event"
     elif intent == "EVENT":
         return "final"
-    else:
+    elif intent == "NEGATIVE":
         return "goodbye"
+    else:
+        return "human_input"
+
+def should_continue(state: GraphState):
+    """ Return the next node to execute """
+
+    finished=state.get('event', {"finished": False}).get("finished", False)
+    if finished:
+        return NodeName.FINAL.value
+    
+    return NodeName.INTERVIEW.value

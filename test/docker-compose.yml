@@ -1,0 +1,17 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # This command is commented out because the debug command is now in the Dockerfile.
+    # We leave it here to show what a production command would look like.
+    # command: python main.py 
+    volumes:
+      # Mounts the local 'app' directory into the container's 'app' directory.
+      # This allows you to change code locally and see it reflected inside the container without rebuilding.
+      - ./:/usr/src/app/
+    ports:
+      # Maps port 5000 on your local machine to port 5000 in the container (for the Flask app).
+      - "5000:5000"
+      # Maps port 5678 on your local machine to port 5678 in the container (for the debugger).
+      - "5678:5678"

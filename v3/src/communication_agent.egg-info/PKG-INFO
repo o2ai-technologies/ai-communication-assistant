@@ -1,0 +1,18 @@
+Metadata-Version: 2.4
+Name: communication-agent
+Version: 0.0.1
+Summary: Backend for the communication agent
+Author-email: O2 AI <o2.ai.technologies@gmail.com>
+Requires-Python: <4.0,>=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: langgraph>=0.2.6
+Requires-Dist: langchain>=0.3.19
+Requires-Dist: langchain-google-genai
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: langgraph-sdk>=0.1.57
+Requires-Dist: langgraph-cli
+Requires-Dist: langgraph-api
+Requires-Dist: google-genai
+Provides-Extra: dev
+Requires-Dist: mypy>=1.11.1; extra == "dev"
+Requires-Dist: ruff>=0.6.1; extra == "dev"
