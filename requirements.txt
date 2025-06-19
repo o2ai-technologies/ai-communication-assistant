@@ -1,8 +1,14 @@
 # Project Dependencies
 langchain
 langchain-google-genai
+langchain-openai
+google-genai
 langchain-community
 langchain-tavily
 langgraph
+langgraph-api
+langgraph-cli
+langgraph-sdk
+python-dotenv
 tavily-python
 chainlit
