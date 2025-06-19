@@ -20,10 +20,9 @@ async def on_message(msg: cl.Message):
     config = {"configurable": {"thread_id": cl.context.session.id}}
     cb = cl.LangchainCallbackHandler()  
     final_answer = cl.Message(content="")
-    next_node, = graph.get_state(config).next
     
-    graph.update_state(config, {"messages": msg.content}, next_node)
-    for msg, metadata in graph.stream(None, stream_mode="messages", config=RunnableConfig(callbacks=[cb], **config)):
+    graph.update_state(config, {"messages": msg.content})
+    for msg, _ in graph.stream(None, stream_mode="messages", config=RunnableConfig(callbacks=[cb], **config)):
         if (
             msg.content
             and not isinstance(msg, HumanMessage)
