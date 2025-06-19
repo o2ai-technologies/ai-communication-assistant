@@ -113,5 +113,5 @@ interview_builder.add_edge("tools", "interview")
 interview_builder.add_edge("final", END)
 interview_builder.add_edge("goodbye", END)
 
-interview_agent = interview_builder.compile(interrupt_before=["human_input"], checkpointer=memory)
-# interview_agent = interview_builder.compile(interrupt_before=["human_input"])
+interview_graph = interview_builder.compile(interrupt_before=["human_input"], checkpointer=memory)
+# interview_graph = interview_builder.compile(interrupt_before=["human_input"])
