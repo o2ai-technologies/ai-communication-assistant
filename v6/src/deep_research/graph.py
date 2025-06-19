@@ -59,9 +59,13 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
 
     # Format the prompt
     current_date = get_current_date()
+    event = state["event"]
     formatted_prompt = query_writer_instructions.format(
         current_date=current_date,
-        research_topic=get_research_topic(state["event"]),
+        target_audience=event["target_audience"],
+        event_name=event["event"]["name"],
+        audience_knowledge=event["audience_knowledge"],
+        key_message=event["key_message"],
         number_queries=state["initial_search_query_count"],
     )
     # Generate the search queries
@@ -276,5 +280,5 @@ builder.add_conditional_edges(
 # Finalize the answer
 builder.add_edge("finalize_answer", END)
 
-deep_research_graph = builder.compile(name="pro-search-agent", checkpointer=memory)
-# deep_research_graph = builder.compile(name="pro-search-agent")
+deep_research_graph = builder.compile(checkpointer=memory)
+# deep_research_graph = builder.compile()

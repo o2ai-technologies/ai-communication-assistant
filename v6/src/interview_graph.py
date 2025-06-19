@@ -42,7 +42,7 @@ def final_node(state: GraphState) -> GraphState:
     parsing_instructions = prompts.finalizing_interview_prompt.format(event=event,last_human_message=last_human_message, messages=messages)
     parsed_response = llm.with_structured_output(Event).invoke([HumanMessage(parsing_instructions)])
     return {
-        "messages": [AIMessage(content=f"Ось підсумок що ми зібрали:\n\n {parsed_response.model_dump()}")]
+        "messages": [AIMessage(content=f"Чудово, тепер я зберу інформацію, яка допоможе тобі підготувати аргументи для твого виступу")]
     }
 
 def goodbye_node(state: GraphState) -> GraphState:

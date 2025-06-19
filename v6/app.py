@@ -20,14 +20,12 @@ async def on_message(msg: cl.Message):
     config = {"configurable": {"thread_id": cl.context.session.id}}
     cb = cl.LangchainCallbackHandler()  
     final_answer = cl.Message(content="")
-    # sub_state = graph.get_state(config, subgraphs=True).tasks[0].state
-    # next_node, = graph.get_state(config, subgraphs=True).next
-    # sub_cfg = sub_state.config
-    # sub_next_node, = sub_state.next
+    sub_state = graph.get_state(config, subgraphs=True).tasks[0].state
+    sub_cfg = sub_state.config
+    sub_next_node, = sub_state.next
     
     
-    # graph.update_state(sub_cfg, {"messages": msg.content}, sub_next_node)
-    graph.update_state(config, {"messages": msg.content})
+    graph.update_state(sub_cfg, {"messages": msg.content}, sub_next_node)
     for msg, _ in graph.stream(None, stream_mode="messages", config=RunnableConfig(callbacks=[cb], **config)):
         if (
             msg.content
