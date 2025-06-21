@@ -1,5 +1,4 @@
 from src.deep_research.tools_and_schemas import SearchQueryList, Reflection
-from langchain_core.messages import AIMessage
 from langgraph.types import Send
 from langgraph.graph import StateGraph
 from langgraph.graph import START, END
@@ -33,7 +32,7 @@ from src.deep_research.utils import (
 def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerationState:
     """LangGraph node that generates a search queries based on the User's question.
 
-    Uses Gemini 2.0 Flash to create an optimized search query for web research based on
+    Uses Gemini to create an optimized search query for web research based on
     the User's question.
 
     Args:
@@ -45,11 +44,9 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     """
     configurable = Configuration.from_runnable_config(config)
 
-    # check for custom initial search query count
     if state.get("initial_search_query_count") is None:
         state["initial_search_query_count"] = configurable.number_of_initial_queries
 
-    # init Gemini 2.0 Flash
     llm = ChatGoogleGenerativeAI(
         model=configurable.query_generator_model,
         temperature=1.0,
@@ -57,7 +54,6 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
     )
     structured_llm = llm.with_structured_output(SearchQueryList)
 
-    # Format the prompt
     current_date = get_current_date()
     event = state["event"]
     formatted_prompt = query_writer_instructions.format(
@@ -68,7 +64,6 @@ def generate_query(state: OverallState, config: RunnableConfig) -> QueryGenerati
         key_message=event["key_message"],
         number_queries=state["initial_search_query_count"],
     )
-    # Generate the search queries
     result = structured_llm.invoke(formatted_prompt)
     return {"query_list": result.query}
 
@@ -143,18 +138,15 @@ def reflection(state: OverallState, config: RunnableConfig) -> ReflectionState:
         Dictionary with state update, including search_query key containing the generated follow-up query
     """
     configurable = Configuration.from_runnable_config(config)
-    # Increment the research loop count and get the reasoning model
     state["research_loop_count"] = state.get("research_loop_count", 0) + 1
     reasoning_model = state.get("reasoning_model") or configurable.reasoning_model
 
-    # Format the prompt
     current_date = get_current_date()
     formatted_prompt = reflection_instructions.format(
         current_date=current_date,
         research_topic=get_research_topic(state["messages"]),
         summaries="\n\n---\n\n".join(state["web_research_result"]),
     )
-    # init Reasoning Model
     llm = ChatGoogleGenerativeAI(
         model=reasoning_model,
         temperature=1.0,
@@ -250,35 +242,36 @@ def finalize_answer(state: OverallState, config: RunnableConfig):
             unique_sources.append(source)
 
     return {
-        "messages": [AIMessage(content=result.content)],
+        "messages": [result],
+        "final_research_result": result.content,
         "sources_gathered": unique_sources,
     }
 
 
 # Create our Agent Graph
-builder = StateGraph(OverallState, config_schema=Configuration)
+deep_research_builder = StateGraph(OverallState, config_schema=Configuration)
 
 # Define the nodes we will cycle between
-builder.add_node("generate_query", generate_query)
-builder.add_node("web_research", web_research)
-builder.add_node("reflection", reflection)
-builder.add_node("finalize_answer", finalize_answer)
+deep_research_builder.add_node("generate_query", generate_query)
+deep_research_builder.add_node("web_research", web_research)
+deep_research_builder.add_node("reflection", reflection)
+deep_research_builder.add_node("finalize_answer", finalize_answer)
 
 # Set the entrypoint as `generate_query`
 # This means that this node is the first one called
-builder.add_edge(START, "generate_query")
+deep_research_builder.add_edge(START, "generate_query")
 # Add conditional edge to continue with search queries in a parallel branch
-builder.add_conditional_edges(
+deep_research_builder.add_conditional_edges(
     "generate_query", continue_to_web_research, ["web_research"]
 )
 # Reflect on the web research
-builder.add_edge("web_research", "reflection")
+deep_research_builder.add_edge("web_research", "reflection")
 # Evaluate the research
-builder.add_conditional_edges(
+deep_research_builder.add_conditional_edges(
     "reflection", evaluate_research, ["web_research", "finalize_answer"]
 )
 # Finalize the answer
-builder.add_edge("finalize_answer", END)
+deep_research_builder.add_edge("finalize_answer", END)
 
-deep_research_graph = builder.compile(checkpointer=memory)
-# deep_research_graph = builder.compile()
+deep_research_graph = deep_research_builder.compile(checkpointer=memory)
+# deep_research_graph = deep_research_builder.compile()

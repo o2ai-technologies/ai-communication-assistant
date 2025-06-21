@@ -24,5 +24,8 @@ class Event(BaseModel):
 
 class GraphState(MessagesState):
     event: Event = Event()
+    final_research_result: Optional[str] = Field(default=None)
+    generated_arguments: Optional[list[str]] = Field(default_factory=list)
+    arguments_approved: Optional[bool] = Field(default=None)
 
 memory = MemorySaver()
