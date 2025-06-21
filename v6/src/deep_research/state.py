@@ -14,6 +14,8 @@ from typing_extensions import Annotated
 from src.state import Event
 
 
+from typing import Optional
+
 class OverallState(MessagesState):
     event: Event
     search_query: Annotated[list, operator.add]
@@ -23,6 +25,7 @@ class OverallState(MessagesState):
     max_research_loops: int
     research_loop_count: int
     reasoning_model: str
+    final_research_result: Optional[str] = None
 
 
 class ReflectionState(TypedDict):

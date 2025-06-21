@@ -20,7 +20,7 @@ def interview_node(state: GraphState) -> GraphState:
     sys_prompt = prompts.context_builder_sys_prompt.format(event=event)
     ai_response = llm_with_tools.invoke([sys_prompt] + state["messages"])
 
-    return {"messages": [ai_response],}
+    return {"messages": [ai_response]}
     
 def human_input_node(state: GraphState) -> GraphState:
     pass
@@ -36,18 +36,13 @@ def parsing_node(state: GraphState) -> GraphState:
     return {"event": parsed_response.model_dump()}
     
 def final_node(state: GraphState) -> GraphState:
-    messages = state["messages"]
-    last_human_message = messages[-1] if messages else None
-    event = state.get("event", None)
-    parsing_instructions = prompts.finalizing_interview_prompt.format(event=event,last_human_message=last_human_message, messages=messages)
-    parsed_response = llm.with_structured_output(Event).invoke([HumanMessage(parsing_instructions)])
     return {
-        "messages": [AIMessage(content=f"Чудово, тепер я зберу інформацію, яка допоможе тобі підготувати аргументи для твого виступу")]
+        "messages": [AIMessage(content=f"Чудово, тепер я зберу інформацію, яка допоможе тобі підготувати аргументи для твого виступу\n\n")]
     }
 
 def goodbye_node(state: GraphState) -> GraphState:
     return {
-        "messages": [AIMessage(content="Шкода, зустрінемось наступного разу.\n")]
+        "messages": [AIMessage(content="Шкода, зустрінемось наступного разу.\n\n")]
     }
     
 def is_interview_completed(event: Event) -> bool:
