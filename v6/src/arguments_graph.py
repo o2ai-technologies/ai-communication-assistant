@@ -33,7 +33,7 @@ def generate_arguments_node(state: GraphState) -> GraphState:
     
     response = llm.invoke([HumanMessage(prompt)])
     
-    return {"messages": [response]}
+    return {"messages": [response], "generated_arguments": response.content.split("\n")}
 
 def human_input_node(state: GraphState) -> GraphState:
     pass
